@@ -1624,3 +1624,64 @@
   )
 )
 
+;; Implement two-phase transmission approval process
+(define-public (request-transmission-approval (crystal-id uint) (approval-code (buff 32)))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (beneficiary (get beneficiary crystal-data))
+      )
+      ;; Only originator or beneficiary can request approval
+      (asserts! (or (is-eq tx-sender originator) (is-eq tx-sender beneficiary)) ERR_PERMISSION_DENIED)
+      ;; Crystal must be in appropriate state
+      (asserts! (is-eq (get lattice-state crystal-data) "stabilizing") ERR_ALREADY_PROCESSED)
+      ;; Update lattice state to indicate pending approval
+
+      (print {action: "transmission_approval_requested", crystal-id: crystal-id, 
+              requester: tx-sender, approval-hash: (hash160 approval-code)})
+      (ok true)
+    )
+  )
+)
+
+;; Implement secure energy rotation mechanism
+(define-public (rotate-crystal-energy (crystal-id uint) (rotation-target principal) (rotation-percentage uint))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (asserts! (> rotation-percentage u0) ERR_INVALID_QUANTITY)
+    (asserts! (<= rotation-percentage u50) ERR_INVALID_QUANTITY) ;; Maximum 50% rotation allowed
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (beneficiary (get beneficiary crystal-data))
+        (current-energy (get energy crystal-data))
+        (rotation-amount (/ (* current-energy rotation-percentage) u100))
+        (remaining-energy (- current-energy rotation-amount))
+      )
+      ;; Only originator can initiate rotation
+      (asserts! (is-eq tx-sender originator) ERR_PERMISSION_DENIED)
+      ;; Crystal must be in appropriate state
+      (asserts! (is-eq (get lattice-state crystal-data) "stabilizing") ERR_ALREADY_PROCESSED)
+      ;; Rotation target cannot be originator or beneficiary
+      (asserts! (not (is-eq rotation-target originator)) (err u501))
+      (asserts! (not (is-eq rotation-target beneficiary)) (err u502))
+      ;; Transfer rotated energy amount
+      (unwrap! (as-contract (stx-transfer? rotation-amount tx-sender rotation-target)) ERR_TRANSMISSION_FAILED)
+      ;; Update crystal energy
+      (map-set CrystalLattice
+        { crystal-id: crystal-id }
+        (merge crystal-data { energy: remaining-energy })
+      )
+      (print {action: "energy_rotated", crystal-id: crystal-id, rotation-target: rotation-target, 
+              rotation-amount: rotation-amount, remaining-energy: remaining-energy})
+      (ok rotation-amount)
+    )
+  )
+)
+
+
+
