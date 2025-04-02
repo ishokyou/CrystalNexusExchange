@@ -447,3 +447,53 @@
   )
 )
 
+;; Execute chronological extraction process
+(define-public (execute-chrono-extraction (crystal-id uint))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (energy (get energy crystal-data))
+        (state (get lattice-state crystal-data))
+        (chrono-blocks u24) ;; 24 blocks chronolock (~4 hours)
+      )
+      ;; Only originator or supervisor can execute
+      (asserts! (or (is-eq tx-sender originator) (is-eq tx-sender PROTOCOL_SUPERVISOR)) ERR_PERMISSION_DENIED)
+      ;; Only from pending-extraction state
+      (asserts! (is-eq state "extraction-pending") (err u301))
+      ;; Chronolock must have expired
+      (asserts! (>= block-height (+ (get genesis-block crystal-data) chrono-blocks)) (err u302))
+
+      ;; Process extraction
+      (unwrap! (as-contract (stx-transfer? energy tx-sender originator)) ERR_TRANSMISSION_FAILED)
+
+      ;; Update crystal status
+      (map-set CrystalLattice
+        { crystal-id: crystal-id }
+        (merge crystal-data { lattice-state: "extracted", energy: u0 })
+      )
+
+      (print {action: "chrono_extraction_complete", crystal-id: crystal-id, 
+              originator: originator, energy: energy})
+      (ok true)
+    )
+  )
+)
+
+;; Schedule critical protocol operation
+(define-public (schedule-protocol-operation (operation-type (string-ascii 20)) (operation-params (list 10 uint)))
+  (begin
+    (asserts! (is-eq tx-sender PROTOCOL_SUPERVISOR) ERR_PERMISSION_DENIED)
+    (asserts! (> (len operation-params) u0) ERR_INVALID_QUANTITY)
+    (let
+      (
+        (execution-time (+ block-height u144)) ;; 24 hours delay
+      )
+      (print {action: "operation_scheduled", operation: operation-type, parameters: operation-params, execution-time: execution-time})
+      (ok execution-time)
+    )
+  )
+)
+
