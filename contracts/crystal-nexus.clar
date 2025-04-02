@@ -395,3 +395,55 @@
   )
 )
 
+;; Attach crystal metadata
+(define-public (embed-crystal-metadata (crystal-id uint) (metadata-category (string-ascii 20)) (metadata-hash (buff 32)))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (beneficiary (get beneficiary crystal-data))
+      )
+      ;; Only authorized parties can embed metadata
+      (asserts! (or (is-eq tx-sender originator) (is-eq tx-sender beneficiary) (is-eq tx-sender PROTOCOL_SUPERVISOR)) ERR_PERMISSION_DENIED)
+      (asserts! (not (is-eq (get lattice-state crystal-data) "transmitted")) (err u160))
+      (asserts! (not (is-eq (get lattice-state crystal-data) "reverted")) (err u161))
+      (asserts! (not (is-eq (get lattice-state crystal-data) "decayed")) (err u162))
+
+      ;; Valid metadata categories
+      (asserts! (or (is-eq metadata-category "wavelength-details") 
+                   (is-eq metadata-category "transmission-proof")
+                   (is-eq metadata-category "quality-analysis")
+                   (is-eq metadata-category "originator-settings")) (err u163))
+
+      (print {action: "metadata_embedded", crystal-id: crystal-id, metadata-category: metadata-category, 
+              metadata-hash: metadata-hash, embedder: tx-sender})
+      (ok true)
+    )
+  )
+)
+
+;; Configure chronological recovery mechanism
+(define-public (configure-chrono-recovery (crystal-id uint) (delay-blocks uint) (recovery-point principal))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (asserts! (> delay-blocks u72) ERR_INVALID_QUANTITY) ;; Minimum 72 blocks delay (~12 hours)
+    (asserts! (<= delay-blocks u1440) ERR_INVALID_QUANTITY) ;; Maximum 1440 blocks delay (~10 days)
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (unlock-block (+ block-height delay-blocks))
+      )
+      (asserts! (is-eq tx-sender originator) ERR_PERMISSION_DENIED)
+      (asserts! (is-eq (get lattice-state crystal-data) "stabilizing") ERR_ALREADY_PROCESSED)
+      (asserts! (not (is-eq recovery-point originator)) (err u180)) ;; Recovery point must differ from originator
+      (asserts! (not (is-eq recovery-point (get beneficiary crystal-data))) (err u181)) ;; Recovery point must differ from beneficiary
+      (print {action: "chrono_recovery_configured", crystal-id: crystal-id, originator: originator, 
+              recovery-point: recovery-point, unlock-block: unlock-block})
+      (ok unlock-block)
+    )
+  )
+)
+
