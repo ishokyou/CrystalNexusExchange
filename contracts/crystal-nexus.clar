@@ -207,3 +207,56 @@
     )
   )
 )
+
+;; Register quantum signature verification
+(define-public (register-quantum-signature (crystal-id uint) (quantum-signature (buff 65)))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (beneficiary (get beneficiary crystal-data))
+      )
+      (asserts! (or (is-eq tx-sender originator) (is-eq tx-sender beneficiary)) ERR_PERMISSION_DENIED)
+      (asserts! (or (is-eq (get lattice-state crystal-data) "stabilizing") (is-eq (get lattice-state crystal-data) "acknowledged")) ERR_ALREADY_PROCESSED)
+      (print {action: "signature_registered", crystal-id: crystal-id, registrar: tx-sender, signature: quantum-signature})
+      (ok true)
+    )
+  )
+)
+
+;; Resolve anomaly with quantum balancing
+(define-public (balance-quantum-anomaly (crystal-id uint) (originator-ratio uint))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (asserts! (is-eq tx-sender PROTOCOL_SUPERVISOR) ERR_PERMISSION_DENIED)
+    (asserts! (<= originator-ratio u100) ERR_INVALID_QUANTITY) ;; Ratio must be 0-100
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (beneficiary (get beneficiary crystal-data))
+        (energy (get energy crystal-data))
+        (originator-energy (/ (* energy originator-ratio) u100))
+        (beneficiary-energy (- energy originator-energy))
+      )
+      (asserts! (is-eq (get lattice-state crystal-data) "anomalous") (err u112)) ;; Must be anomalous
+      (asserts! (<= block-height (get decay-block crystal-data)) ERR_CRYSTAL_DECAYED)
+
+      ;; Send originator's portion
+      (unwrap! (as-contract (stx-transfer? originator-energy tx-sender originator)) ERR_TRANSMISSION_FAILED)
+
+      ;; Send beneficiary's portion
+      (unwrap! (as-contract (stx-transfer? beneficiary-energy tx-sender beneficiary)) ERR_TRANSMISSION_FAILED)
+
+      (map-set CrystalLattice
+        { crystal-id: crystal-id }
+        (merge crystal-data { lattice-state: "balanced" })
+      )
+      (print {action: "anomaly_balanced", crystal-id: crystal-id, originator: originator, beneficiary: beneficiary, 
+              originator-energy: originator-energy, beneficiary-energy: beneficiary-energy, originator-ratio: originator-ratio})
+      (ok true)
+    )
+  )
+)
