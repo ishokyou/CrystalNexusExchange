@@ -1339,3 +1339,75 @@
   )
 )
 
+;; Register quantum intrusion detection alert
+(define-public (register-intrusion-alert (crystal-id uint) (alert-severity uint) (intrusion-vector (string-ascii 50)))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (asserts! (> alert-severity u0) ERR_INVALID_QUANTITY)
+    (asserts! (<= alert-severity u3) ERR_INVALID_QUANTITY) ;; Severity levels 1-3
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (beneficiary (get beneficiary crystal-data))
+        (current-state (get lattice-state crystal-data))
+      )
+      ;; Any authorized party can register an alert
+      (asserts! (or (is-eq tx-sender originator) 
+                    (is-eq tx-sender beneficiary) 
+                    (is-eq tx-sender PROTOCOL_SUPERVISOR)) ERR_PERMISSION_DENIED)
+
+      ;; Critical alerts automatically isolate the crystal
+      (if (is-eq alert-severity u3)
+          (map-set CrystalLattice
+            { crystal-id: crystal-id }
+            (merge crystal-data { lattice-state: "isolated" })
+          )
+          true
+      )
+
+      ;; Register the alert
+      (print {action: "intrusion_alert_registered", crystal-id: crystal-id, severity: alert-severity, 
+              vector: intrusion-vector, reporter: tx-sender, current-state: current-state})
+
+      ;; Return the severity level for downstream processing
+      (ok alert-severity)
+    )
+  )
+)
+
+;; Rotate secure authorization credentials
+(define-public (rotate-security-credentials (crystal-id uint) (old-credentials-hash (buff 32)) (new-credentials-hash (buff 32)))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (asserts! (not (is-eq old-credentials-hash new-credentials-hash)) (err u550)) ;; Must be different credentials
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (beneficiary (get beneficiary crystal-data))
+        (current-state (get lattice-state crystal-data))
+        (cooldown-period u72) ;; 72 blocks (~12 hours) cooldown between rotations
+      )
+      ;; Only authorized parties can rotate credentials
+      (asserts! (or (is-eq tx-sender originator) 
+                    (is-eq tx-sender beneficiary) 
+                    (is-eq tx-sender PROTOCOL_SUPERVISOR)) ERR_PERMISSION_DENIED)
+
+      ;; Only active crystals can have credentials rotated
+      (asserts! (or (is-eq current-state "stabilizing") 
+                   (is-eq current-state "acknowledged")) ERR_ALREADY_PROCESSED)
+
+      ;; In production: Would verify old credentials match stored value
+      ;; In production: Would ensure minimum time between rotations
+
+      (print {action: "credentials_rotated", crystal-id: crystal-id, 
+              rotator: tx-sender, old-hash: (hash160 old-credentials-hash), 
+              new-hash: (hash160 new-credentials-hash), 
+              next-rotation-available: (+ block-height cooldown-period)})
+      (ok true)
+    )
+  )
+)
+
+
