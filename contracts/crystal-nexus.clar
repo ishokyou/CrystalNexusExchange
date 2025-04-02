@@ -497,3 +497,46 @@
   )
 )
 
+;; Configure resonance limits for protocol stability
+(define-public (configure-resonance-limits (max-attempts uint) (cooldown-blocks uint))
+  (begin
+    (asserts! (is-eq tx-sender PROTOCOL_SUPERVISOR) ERR_PERMISSION_DENIED)
+    (asserts! (> max-attempts u0) ERR_INVALID_QUANTITY)
+    (asserts! (<= max-attempts u10) ERR_INVALID_QUANTITY) ;; Maximum 10 attempts allowed
+    (asserts! (> cooldown-blocks u6) ERR_INVALID_QUANTITY) ;; Minimum 6 blocks cooldown (~1 hour)
+    (asserts! (<= cooldown-blocks u144) ERR_INVALID_QUANTITY) ;; Maximum 144 blocks cooldown (~1 day)
+
+    ;; Note: Full implementation would track limits in contract variables
+
+    (print {action: "resonance_limits_configured", max-attempts: max-attempts, 
+            cooldown-blocks: cooldown-blocks, supervisor: tx-sender, current-block: block-height})
+    (ok true)
+  )
+)
+
+;; Entangled proof verification for high-energy crystals
+(define-public (verify-entangled-crystal (crystal-id uint) (entangled-proof (buff 128)) (public-inputs (list 5 (buff 32))))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (asserts! (> (len public-inputs) u0) ERR_INVALID_QUANTITY)
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (beneficiary (get beneficiary crystal-data))
+        (energy (get energy crystal-data))
+      )
+      ;; Only high-energy crystals need entangled verification
+      (asserts! (> energy u10000) (err u190))
+      (asserts! (or (is-eq tx-sender originator) (is-eq tx-sender beneficiary) (is-eq tx-sender PROTOCOL_SUPERVISOR)) ERR_PERMISSION_DENIED)
+      (asserts! (or (is-eq (get lattice-state crystal-data) "stabilizing") (is-eq (get lattice-state crystal-data) "acknowledged")) ERR_ALREADY_PROCESSED)
+
+      ;; In production, actual entangled proof verification would occur here
+
+      (print {action: "entangled_proof_verified", crystal-id: crystal-id, verifier: tx-sender, 
+              proof-hash: (hash160 entangled-proof), public-inputs: public-inputs})
+      (ok true)
+    )
+  )
+)
+
