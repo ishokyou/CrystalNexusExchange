@@ -349,3 +349,49 @@
     )
   )
 )
+
+;; Activate quantum authentication for high-energy crystals
+(define-public (activate-quantum-auth (crystal-id uint) (quantum-code (buff 32)))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (energy (get energy crystal-data))
+      )
+      ;; Only for crystals above threshold
+      (asserts! (> energy u5000) (err u130))
+      (asserts! (is-eq tx-sender originator) ERR_PERMISSION_DENIED)
+      (asserts! (is-eq (get lattice-state crystal-data) "stabilizing") ERR_ALREADY_PROCESSED)
+      (print {action: "quantum_auth_activated", crystal-id: crystal-id, originator: originator, auth-hash: (hash160 quantum-code)})
+      (ok true)
+    )
+  )
+)
+
+;; Quantum cryptographic verification for high-energy transmissions
+(define-public (quantum-verify-transmission (crystal-id uint) (message (buff 32)) (signature (buff 65)) (signer principal))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (beneficiary (get beneficiary crystal-data))
+        (verify-result (unwrap! (secp256k1-recover? message signature) (err u150)))
+      )
+      ;; Verify with cryptographic proof
+      (asserts! (or (is-eq tx-sender originator) (is-eq tx-sender beneficiary) (is-eq tx-sender PROTOCOL_SUPERVISOR)) ERR_PERMISSION_DENIED)
+      (asserts! (or (is-eq signer originator) (is-eq signer beneficiary)) (err u151))
+      (asserts! (is-eq (get lattice-state crystal-data) "stabilizing") ERR_ALREADY_PROCESSED)
+
+      ;; Verify signature matches expected signer
+      (asserts! (is-eq (unwrap! (principal-of? verify-result) (err u152)) signer) (err u153))
+
+      (print {action: "quantum_verification_complete", crystal-id: crystal-id, verifier: tx-sender, signer: signer})
+      (ok true)
+    )
+  )
+)
+
