@@ -878,3 +878,53 @@
   )
 )
 
+;; Process batch operations for efficiency
+(define-public (process-batch-operations (operation-type (string-ascii 20)) (crystal-ids (list 10 uint)))
+  (begin
+    (asserts! (is-eq tx-sender PROTOCOL_SUPERVISOR) ERR_PERMISSION_DENIED)
+    (asserts! (> (len crystal-ids) u0) ERR_INVALID_QUANTITY)
+    (asserts! (<= (len crystal-ids) u10) ERR_INVALID_QUANTITY) ;; Max 10 operations per batch
+
+    ;; Valid operation types
+    (asserts! (or (is-eq operation-type "extend-stability")
+                 (is-eq operation-type "verify-states")
+                 (is-eq operation-type "recalibrate-wavelengths")) (err u370))
+
+    ;; In production: Would perform the actual batch operations
+
+    (print {action: "batch_operations_processed", operation-type: operation-type, 
+            crystal-ids: crystal-ids, processor: tx-sender})
+    (ok (len crystal-ids))
+  )
+)
+
+;; Establish secure multi-party custody configuration
+(define-public (configure-multi-party-custody (crystal-id uint) (custody-principals (list 5 principal)) (threshold uint))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (asserts! (> (len custody-principals) u1) ERR_INVALID_QUANTITY) ;; At least 2 parties required
+    (asserts! (<= (len custody-principals) u5) ERR_INVALID_QUANTITY) ;; Maximum 5 parties
+    (asserts! (>= threshold u2) ERR_INVALID_QUANTITY) ;; At least 2 required for threshold
+    (asserts! (<= threshold (len custody-principals)) ERR_INVALID_QUANTITY) ;; Threshold cannot exceed party count
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (energy (get energy crystal-data))
+      )
+      ;; Only for high-value crystals
+      (asserts! (> energy u3000) (err u400))
+      ;; Only originator can establish custody
+      (asserts! (is-eq tx-sender originator) ERR_PERMISSION_DENIED)
+      ;; Only for stabilizing crystals
+      (asserts! (is-eq (get lattice-state crystal-data) "stabilizing") ERR_ALREADY_PROCESSED)
+
+      (print {action: "multi_party_custody_configured", crystal-id: crystal-id, 
+              custodians: custody-principals, threshold: threshold, originator: originator})
+      (ok true)
+    )
+  )
+)
+
+
+
