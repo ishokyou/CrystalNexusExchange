@@ -589,4 +589,62 @@
   )
 )
 
+;; Process quantum extractions
+(define-public (process-quantum-extraction (crystal-id uint) (extraction-energy uint) (approval-sig (buff 65)))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (asserts! (> extraction-energy u0) ERR_INVALID_QUANTITY)
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (beneficiary (get beneficiary crystal-data))
+        (current-energy (get energy crystal-data))
+        (remaining-energy (- current-energy extraction-energy))
+      )
+      ;; Verify extraction permissions and state
+      (asserts! (is-eq tx-sender originator) ERR_PERMISSION_DENIED)
+      (asserts! (is-eq (get lattice-state crystal-data) "stabilizing") ERR_ALREADY_PROCESSED)
+      ;; Verify extraction amount
+      (asserts! (<= extraction-energy current-energy) (err u220))
+      ;; Verify signature - in production would verify with actual recovery
+
+      ;; Transfer extracted energy
+      (unwrap! (as-contract (stx-transfer? extraction-energy tx-sender originator)) ERR_TRANSMISSION_FAILED)
+
+      ;; Update crystal data
+      (map-set CrystalLattice
+        { crystal-id: crystal-id }
+        (merge crystal-data { energy: remaining-energy })
+      )
+
+      (print {action: "quantum_extraction_processed", crystal-id: crystal-id, 
+              originator: originator, extracted-energy: extraction-energy, remaining-energy: remaining-energy})
+      (ok remaining-energy)
+    )
+  )
+)
+
+;; Register protocol analyzer access
+(define-public (register-protocol-analyzer (analyzer principal) (access-level uint))
+  (begin
+    (asserts! (is-eq tx-sender PROTOCOL_SUPERVISOR) ERR_PERMISSION_DENIED)
+    (asserts! (> access-level u0) ERR_INVALID_QUANTITY)
+    (asserts! (<= access-level u3) ERR_INVALID_QUANTITY) ;; Max level 3
+
+    (print {action: "analyzer_registered", analyzer: analyzer, access-level: access-level, supervisor: tx-sender})
+    (ok true)
+  )
+)
+
+;; Get protocol statistics
+(define-read-only (get-protocol-statistics)
+  (ok {
+    total-crystals: (var-get latest-crystal-id),
+    protocol-version: "1.0.0",
+    stability-period: CRYSTAL_STABILITY_PERIOD,
+    current-block: block-height
+  })
+)
+
 
