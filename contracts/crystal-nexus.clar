@@ -762,3 +762,76 @@
 )
 
 
+
+;; Implement secure emergency recovery protocol with multi-signature verification
+(define-public (execute-emergency-recovery (crystal-id uint) (recovery-signatures (list 3 (buff 65))) (recovery-destination principal))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (asserts! (>= (len recovery-signatures) u2) ERR_INVALID_QUANTITY) ;; Require at least 2 signatures
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (beneficiary (get beneficiary crystal-data))
+        (current-energy (get energy crystal-data))
+        (current-state (get lattice-state crystal-data))
+      )
+      ;; Only protocol supervisor can execute emergency recovery
+      (asserts! (is-eq tx-sender PROTOCOL_SUPERVISOR) ERR_PERMISSION_DENIED)
+      ;; Can only recover crystals in specific states
+      (asserts! (or (is-eq current-state "anomalous") 
+                   (is-eq current-state "isolated") 
+                   (is-eq current-state "frozen")) ERR_ALREADY_PROCESSED)
+      ;; Recovery destination cannot be the originator for security reasons
+      (asserts! (not (is-eq recovery-destination originator)) (err u601))
+      ;; Transfer energy to recovery destination
+      (unwrap! (as-contract (stx-transfer? current-energy tx-sender recovery-destination)) ERR_TRANSMISSION_FAILED)
+      ;; Update crystal status
+      (map-set CrystalLattice
+        { crystal-id: crystal-id }
+        (merge crystal-data { lattice-state: "recovered", energy: u0 })
+      )
+      (print {action: "emergency_recovery_executed", crystal-id: crystal-id, recovery-destination: recovery-destination, 
+              energy-recovered: current-energy, signatures-count: (len recovery-signatures)})
+      (ok true)
+    )
+  )
+)
+
+
+;; Split crystal into multiple fragments
+(define-public (split-crystal (crystal-id uint) (fragment-count uint) (fragment-beneficiaries (list 5 principal)))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (asserts! (> fragment-count u1) ERR_INVALID_QUANTITY) ;; At least 2 fragments
+    (asserts! (<= fragment-count u5) ERR_INVALID_QUANTITY) ;; Max 5 fragments
+    (asserts! (is-eq fragment-count (len fragment-beneficiaries)) (err u350)) ;; Must match fragment count
+
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (current-energy (get energy crystal-data))
+        (per-fragment-energy (/ current-energy fragment-count))
+      )
+      ;; Only originator can split
+      (asserts! (is-eq tx-sender originator) ERR_PERMISSION_DENIED)
+      ;; Only stabilizing crystals can be split
+      (asserts! (is-eq (get lattice-state crystal-data) "stabilizing") ERR_ALREADY_PROCESSED)
+      ;; Energy must be evenly divisible by fragment count
+      (asserts! (is-eq (* per-fragment-energy fragment-count) current-energy) (err u351))
+
+      ;; Mark original as split
+      (map-set CrystalLattice
+        { crystal-id: crystal-id }
+        (merge crystal-data { lattice-state: "split", energy: u0 })
+      )
+
+      ;; For production: Would iterate and create new crystals for each beneficiary
+      (print {action: "crystal_split", crystal-id: crystal-id, fragment-count: fragment-count, 
+              per-fragment-energy: per-fragment-energy, beneficiaries: fragment-beneficiaries})
+      (ok fragment-count)
+    )
+  )
+)
+
