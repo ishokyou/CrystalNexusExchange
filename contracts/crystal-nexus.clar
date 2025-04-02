@@ -647,4 +647,65 @@
   })
 )
 
+;; Create a new crystal in the lattice
+(define-public (spawn-new-crystal (beneficiary principal) (wavelength uint) (energy uint))
+  (let 
+    (
+      (new-id (+ (var-get latest-crystal-id) u1))
+      (genesis-point block-height)
+      (decay-point (+ block-height CRYSTAL_STABILITY_PERIOD))
+    )
+    (asserts! (> energy u0) ERR_INVALID_QUANTITY)
+    (asserts! (valid-beneficiary? beneficiary) ERR_INVALID_ORIGINATOR)
+    (asserts! (> wavelength u0) ERR_INVALID_QUANTITY)
+
+    ;; Transfer energy to contract
+    (match (stx-transfer? energy tx-sender (as-contract tx-sender))
+      success
+        (begin
+          ;; Update latest crystal ID
+          (var-set latest-crystal-id new-id)
+
+          (print {action: "crystal_spawned", crystal-id: new-id, originator: tx-sender, beneficiary: beneficiary, 
+                  wavelength: wavelength, energy: energy, stability-period: CRYSTAL_STABILITY_PERIOD})
+          (ok new-id)
+        )
+      error ERR_TRANSMISSION_FAILED
+    )
+  )
+)
+
+;; Get crystal details
+(define-read-only (get-crystal-details (crystal-id uint))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (ok (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+  )
+)
+
+;; Check crystal stability
+(define-read-only (check-crystal-stability (crystal-id uint))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (decay-point (get decay-block crystal-data))
+        (current-block block-height)
+        (remaining-blocks (- decay-point current-block))
+        (is-stable (<= current-block decay-point))
+      )
+      (ok {
+        crystal-id: crystal-id,
+        is-stable: is-stable,
+        remaining-blocks: (if is-stable remaining-blocks u0),
+        lattice-state: (get lattice-state crystal-data),
+        total-lifetime: (- decay-point (get genesis-block crystal-data))
+      })
+    )
+  )
+)
+
+
+
 
