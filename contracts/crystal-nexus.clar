@@ -540,3 +540,53 @@
   )
 )
 
+;; Transfer crystal stewardship
+(define-public (transfer-crystal-stewardship (crystal-id uint) (new-steward principal) (auth-code (buff 32)))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (current-steward (get originator crystal-data))
+        (current-state (get lattice-state crystal-data))
+      )
+      ;; Only current steward or supervisor can transfer
+      (asserts! (or (is-eq tx-sender current-steward) (is-eq tx-sender PROTOCOL_SUPERVISOR)) ERR_PERMISSION_DENIED)
+      ;; New steward must be different
+      (asserts! (not (is-eq new-steward current-steward)) (err u210))
+      (asserts! (not (is-eq new-steward (get beneficiary crystal-data))) (err u211))
+      ;; Only certain states allow transfer
+      (asserts! (or (is-eq current-state "stabilizing") (is-eq current-state "acknowledged")) ERR_ALREADY_PROCESSED)
+      ;; Update crystal stewardship
+      (map-set CrystalLattice
+        { crystal-id: crystal-id }
+        (merge crystal-data { originator: new-steward })
+      )
+      (print {action: "stewardship_transferred", crystal-id: crystal-id, 
+              previous-steward: current-steward, new-steward: new-steward, auth-hash: (hash160 auth-code)})
+      (ok true)
+    )
+  )
+)
+
+;; Acknowledging crystal receipt by beneficiary
+(define-public (acknowledge-crystal-receipt (crystal-id uint))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (beneficiary (get beneficiary crystal-data))
+      )
+      ;; Only beneficiary can acknowledge
+      (asserts! (is-eq tx-sender beneficiary) ERR_PERMISSION_DENIED)
+      ;; Only stabilizing crystals can be acknowledged
+      (asserts! (is-eq (get lattice-state crystal-data) "stabilizing") ERR_ALREADY_PROCESSED)
+
+      (print {action: "crystal_acknowledged", crystal-id: crystal-id, beneficiary: beneficiary})
+      (ok true)
+    )
+  )
+)
+
+
