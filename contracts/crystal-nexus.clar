@@ -1277,3 +1277,65 @@
   )
 )
 
+;; Establish multi-signature requirements for high-value crystals
+(define-public (establish-multi-sig-requirement (crystal-id uint) (required-signatures uint) (authorized-signers (list 5 principal)))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (asserts! (>= required-signatures u2) ERR_INVALID_QUANTITY) ;; Minimum 2 signatures required
+    (asserts! (<= required-signatures (len authorized-signers)) ERR_INVALID_QUANTITY) ;; Can't require more than available signers
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (beneficiary (get beneficiary crystal-data))
+        (energy (get energy crystal-data))
+      )
+      ;; Only high-value crystals need multi-sig
+      (asserts! (> energy u10000) (err u501))
+      ;; Only originator or supervisor can establish multi-sig requirements
+      (asserts! (or (is-eq tx-sender originator) (is-eq tx-sender PROTOCOL_SUPERVISOR)) ERR_PERMISSION_DENIED)
+      ;; Only stabilizing crystals can have requirements added
+      (asserts! (is-eq (get lattice-state crystal-data) "stabilizing") ERR_ALREADY_PROCESSED)
+
+      ;; Ensure originator and beneficiary are included in signers list
+      (asserts! (is-some (index-of authorized-signers originator)) (err u502))
+      (asserts! (is-some (index-of authorized-signers beneficiary)) (err u503))
+
+      (print {action: "multi_sig_established", crystal-id: crystal-id, required-signatures: required-signatures, 
+              authorized-signers: authorized-signers, establisher: tx-sender})
+      (ok true)
+    )
+  )
+)
+
+;; Implement time-locked security mechanism to prevent rapid actions
+(define-public (implement-time-lock (crystal-id uint) (lock-duration uint) (unlock-condition (string-ascii 30)))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (asserts! (>= lock-duration u12) ERR_INVALID_QUANTITY) ;; Minimum 12 blocks (~2 hours)
+    (asserts! (<= lock-duration u720) ERR_INVALID_QUANTITY) ;; Maximum 720 blocks (~5 days)
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (current-state (get lattice-state crystal-data))
+        (unlock-height (+ block-height lock-duration))
+      )
+      ;; Only originator or supervisor can implement time lock
+      (asserts! (or (is-eq tx-sender originator) (is-eq tx-sender PROTOCOL_SUPERVISOR)) ERR_PERMISSION_DENIED)
+      ;; Only for active crystals
+      (asserts! (or (is-eq current-state "stabilizing") (is-eq current-state "acknowledged")) ERR_ALREADY_PROCESSED)
+
+      ;; Valid unlock conditions
+      (asserts! (or (is-eq unlock-condition "multi-signature")
+                   (is-eq unlock-condition "quantum-verification")
+                   (is-eq unlock-condition "temporal-threshold")
+                   (is-eq unlock-condition "supervisor-override")) (err u520))
+
+      (print {action: "time_lock_implemented", crystal-id: crystal-id, lock-duration: lock-duration, 
+              unlock-condition: unlock-condition, unlock-height: unlock-height, implementer: tx-sender})
+      (ok unlock-height)
+    )
+  )
+)
+
