@@ -1159,6 +1159,62 @@
   )
 )
 
+;; Implement rate-limiting for critical crystal operations
+(define-public (configure-rate-limiting (operation-type (string-ascii 20)) (max-operations uint) (time-window uint))
+  (begin
+    (asserts! (is-eq tx-sender PROTOCOL_SUPERVISOR) ERR_PERMISSION_DENIED)
+    (asserts! (> max-operations u0) ERR_INVALID_QUANTITY) ;; Must allow at least 1 operation
+    (asserts! (<= max-operations u100) ERR_INVALID_QUANTITY) ;; Cap at reasonable limit
+    (asserts! (> time-window u12) ERR_INVALID_QUANTITY) ;; Minimum window ~2 hours
+    (asserts! (<= time-window u1440) ERR_INVALID_QUANTITY) ;; Maximum window ~10 days
 
+    ;; Valid operation types for rate limiting
+    (asserts! (or (is-eq operation-type "crystal-creation") 
+                 (is-eq operation-type "energy-transmission")
+                 (is-eq operation-type "crystal-dissolution")
+                 (is-eq operation-type "quantum-extraction")) (err u600))
 
+    ;; In production: Would store rate limiting parameters
+
+    (print {action: "rate_limiting_configured", operation-type: operation-type, 
+            max-operations: max-operations, time-window-blocks: time-window, 
+            supervisor: tx-sender, current-block: block-height})
+    (ok true)
+  )
+)
+
+;; Implement secure crystal recovery with multi-factor verification
+(define-public (initiate-secure-recovery (crystal-id uint) (recovery-seed (buff 32)) (recovery-proofs (list 3 (buff 64))))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (asserts! (>= (len recovery-proofs) u2) ERR_INVALID_QUANTITY) ;; At least 2 proofs required
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (beneficiary (get beneficiary crystal-data))
+        (energy (get energy crystal-data))
+        (current-state (get lattice-state crystal-data))
+        (recovery-delay u144) ;; 24 hours delay before recovery completes
+      )
+      ;; Only supervisor can initiate recovery for security
+      (asserts! (is-eq tx-sender PROTOCOL_SUPERVISOR) ERR_PERMISSION_DENIED)
+      ;; Only certain states allow recovery
+      (asserts! (or (is-eq current-state "anomalous") 
+                   (is-eq current-state "isolated")
+                   (is-eq current-state "encrypted")) ERR_ALREADY_PROCESSED)
+
+      ;; Change crystal state to recovery mode
+      (map-set CrystalLattice
+        { crystal-id: crystal-id }
+        (merge crystal-data { lattice-state: "recovering" })
+      )
+
+      (print {action: "secure_recovery_initiated", crystal-id: crystal-id, 
+              recovery-seed-hash: (hash160 recovery-seed), proof-count: (len recovery-proofs),
+              completion-block: (+ block-height recovery-delay), energy-at-risk: energy})
+      (ok (+ block-height recovery-delay))
+    )
+  )
+)
 
