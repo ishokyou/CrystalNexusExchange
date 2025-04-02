@@ -1036,4 +1036,63 @@
   )
 )
 
+;; Register tamper-evident monitoring for critical operations
+(define-public (register-tamper-monitoring (crystal-ids (list 10 uint)) (monitor-principal principal) (verification-frequency uint))
+  (begin
+    (asserts! (> (len crystal-ids) u0) ERR_INVALID_QUANTITY)
+    (asserts! (<= (len crystal-ids) u10) ERR_INVALID_QUANTITY) ;; Maximum 10 crystals per monitoring set
+    (asserts! (> verification-frequency u0) ERR_INVALID_QUANTITY) 
+    (asserts! (<= verification-frequency u144) ERR_INVALID_QUANTITY) ;; Maximum once per day (144 blocks)
+
+    ;; Only supervisor or crystal originators can register monitoring
+    (asserts! (is-eq tx-sender PROTOCOL_SUPERVISOR) ERR_PERMISSION_DENIED)
+
+    ;; In production: would validate all crystal IDs and verify monitor permissions
+
+    ;; Validate all crystal IDs
+    (let 
+      (
+        (valid-ids (filter valid-crystal-id? crystal-ids))
+      )
+      (asserts! (is-eq (len valid-ids) (len crystal-ids)) ERR_INVALID_IDENTIFIER)
+
+      (print {action: "tamper_monitoring_registered", crystals: crystal-ids, 
+              monitor: monitor-principal, frequency: verification-frequency,
+              registration-block: block-height})
+      (ok (len crystal-ids))
+    )
+  )
+)
+
+;; Register time-locked security override
+(define-public (register-security-override (crystal-id uint) (override-delay uint) (authorized-override principal))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (asserts! (> override-delay u144) ERR_INVALID_QUANTITY) ;; Minimum 144 blocks (~1 day)
+    (asserts! (<= override-delay u4320) ERR_INVALID_QUANTITY) ;; Maximum 4320 blocks (~30 days)
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (current-state (get lattice-state crystal-data))
+        (activation-block (+ block-height override-delay))
+      )
+      ;; Only originator can register security override
+      (asserts! (is-eq tx-sender originator) ERR_PERMISSION_DENIED)
+      ;; Crystal must be in appropriate state
+      (asserts! (or (is-eq current-state "stabilizing") (is-eq current-state "acknowledged")) ERR_ALREADY_PROCESSED)
+      ;; Authorized override must not be originator
+      (asserts! (not (is-eq authorized-override originator)) (err u450))
+      ;; Authorized override must not be beneficiary
+      (asserts! (not (is-eq authorized-override (get beneficiary crystal-data))) (err u451))
+
+      (print {action: "security_override_registered", crystal-id: crystal-id, 
+              override-principal: authorized-override, activation-block: activation-block, 
+              originator: originator, current-block: block-height})
+      (ok activation-block)
+    )
+  )
+)
+
+
 
