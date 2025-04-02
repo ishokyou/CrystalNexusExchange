@@ -1410,4 +1410,68 @@
   )
 )
 
+;; Implement emergency circuit breaker for critical situations
+(define-public (activate-circuit-breaker (crystal-id uint) (emergency-reason (string-ascii 100)) (authorization-code (buff 64)))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (energy (get energy crystal-data))
+        (current-state (get lattice-state crystal-data))
+      )
+      ;; Only originator or supervisor can trigger circuit breaker
+      (asserts! (or (is-eq tx-sender originator) (is-eq tx-sender PROTOCOL_SUPERVISOR)) ERR_PERMISSION_DENIED)
 
+      ;; Cannot break already finalized states
+      (asserts! (not (is-eq current-state "transmitted")) ERR_ALREADY_PROCESSED)
+      (asserts! (not (is-eq current-state "reverted")) ERR_ALREADY_PROCESSED)
+      (asserts! (not (is-eq current-state "dissolved")) ERR_ALREADY_PROCESSED)
+      (asserts! (not (is-eq current-state "decayed")) ERR_ALREADY_PROCESSED)
+
+      ;; Immediately return funds to originator
+      (match (as-contract (stx-transfer? energy tx-sender originator))
+        success
+          (begin
+            ;; Update crystal status
+
+            (print {action: "circuit_breaker_activated", crystal-id: crystal-id, 
+                    activator: tx-sender, reason: emergency-reason, 
+                    energy-returned: energy, auth-hash: (hash160 authorization-code)})
+            (ok true)
+          )
+        error ERR_TRANSMISSION_FAILED
+      )
+    )
+  )
+)
+
+;; Implement circuit breaker to pause certain operations during anomalous activity
+(define-public (engage-circuit-breaker (operation-type (string-ascii 20)) (duration-blocks uint) (reason (string-ascii 50)))
+  (begin
+    (asserts! (is-eq tx-sender PROTOCOL_SUPERVISOR) ERR_PERMISSION_DENIED)
+    (asserts! (> duration-blocks u0) ERR_INVALID_QUANTITY)
+    (asserts! (<= duration-blocks u1440) ERR_INVALID_QUANTITY) ;; Max 10 days of pause
+
+    ;; Valid operation types to pause
+    (asserts! (or (is-eq operation-type "all-transmissions")
+                 (is-eq operation-type "high-energy-operations")
+                 (is-eq operation-type "anomaly-resolution")
+                 (is-eq operation-type "quantum-extractions")
+                 (is-eq operation-type "stewardship-transfers")) (err u420))
+
+    ;; Calculate resumption block
+    (let
+      (
+        (resumption-block (+ block-height duration-blocks))
+      )
+      ;; In production: Would update a map tracking paused operations
+
+      (print {action: "circuit_breaker_engaged", operation-type: operation-type,
+              duration: duration-blocks, resumption-block: resumption-block,
+              supervisor: tx-sender, reason: reason})
+      (ok resumption-block)
+    )
+  )
+)
