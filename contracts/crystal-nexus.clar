@@ -98,3 +98,61 @@
     )
   )
 )
+
+
+;; Originator requests crystal dissolution
+(define-public (dissolve-crystal (crystal-id uint))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (energy (get energy crystal-data))
+      )
+      (asserts! (is-eq tx-sender originator) ERR_PERMISSION_DENIED)
+      (asserts! (is-eq (get lattice-state crystal-data) "stabilizing") ERR_ALREADY_PROCESSED)
+      (asserts! (<= block-height (get decay-block crystal-data)) ERR_CRYSTAL_DECAYED)
+      (match (as-contract (stx-transfer? energy tx-sender originator))
+        success
+          (begin
+            (map-set CrystalLattice
+              { crystal-id: crystal-id }
+              (merge crystal-data { lattice-state: "dissolved" })
+            )
+            (print {action: "crystal_dissolved", crystal-id: crystal-id, originator: originator, energy: energy})
+            (ok true)
+          )
+        error ERR_TRANSMISSION_FAILED
+      )
+    )
+  )
+)
+
+;; Extend crystal stability period
+(define-public (extend-crystal-stability (crystal-id uint) (additional-blocks uint))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (asserts! (> additional-blocks u0) ERR_INVALID_QUANTITY)
+    (asserts! (<= additional-blocks u1440) ERR_INVALID_QUANTITY) ;; Max ~10 days extension
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data)) 
+        (beneficiary (get beneficiary crystal-data))
+        (current-decay (get decay-block crystal-data))
+        (updated-decay (+ current-decay additional-blocks))
+      )
+      (asserts! (or (is-eq tx-sender originator) (is-eq tx-sender beneficiary) (is-eq tx-sender PROTOCOL_SUPERVISOR)) ERR_PERMISSION_DENIED)
+      (asserts! (or (is-eq (get lattice-state crystal-data) "stabilizing") (is-eq (get lattice-state crystal-data) "acknowledged")) ERR_ALREADY_PROCESSED)
+      (map-set CrystalLattice
+        { crystal-id: crystal-id }
+        (merge crystal-data { decay-block: updated-decay })
+      )
+      (print {action: "stability_extended", crystal-id: crystal-id, requester: tx-sender, new-decay-block: updated-decay})
+      (ok true)
+    )
+  )
+)
+
+
