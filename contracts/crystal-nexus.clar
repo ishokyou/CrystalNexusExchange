@@ -926,5 +926,70 @@
   )
 )
 
+;; Apply time-locked security constraints to crystal
+(define-public (apply-timelock-security (crystal-id uint) (lockup-blocks uint) (grace-period-blocks uint))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (asserts! (> lockup-blocks u12) ERR_INVALID_QUANTITY) ;; Minimum 12 blocks (~2 hours)
+    (asserts! (<= lockup-blocks u720) ERR_INVALID_QUANTITY) ;; Maximum 720 blocks (~5 days)
+    (asserts! (> grace-period-blocks u6) ERR_INVALID_QUANTITY) ;; Minimum 6 blocks grace period
+    (asserts! (<= grace-period-blocks u144) ERR_INVALID_QUANTITY) ;; Maximum 144 blocks grace period (~1 day)
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (beneficiary (get beneficiary crystal-data))
+        (unlock-height (+ block-height lockup-blocks))
+      )
+      ;; Only certain parties can apply timelock
+      (asserts! (or (is-eq tx-sender originator) (is-eq tx-sender PROTOCOL_SUPERVISOR)) ERR_PERMISSION_DENIED)
+      ;; Only for stabilizing or acknowledged crystals
+      (asserts! (or (is-eq (get lattice-state crystal-data) "stabilizing") 
+                   (is-eq (get lattice-state crystal-data) "acknowledged")) 
+                ERR_ALREADY_PROCESSED)
+
+      (map-set CrystalLattice
+        { crystal-id: crystal-id }
+        (merge crystal-data { lattice-state: "timelocked" })
+      )
+
+      (print {action: "timelock_security_applied", crystal-id: crystal-id, requester: tx-sender,
+              unlock-height: unlock-height, grace-period: grace-period-blocks})
+      (ok unlock-height)
+    )
+  )
+)
+
+;; Register zero-knowledge verification requirements
+(define-public (register-zk-verification (crystal-id uint) (verification-contract principal) (proof-identifier (string-ascii 30)))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (beneficiary (get beneficiary crystal-data))
+        (energy (get energy crystal-data))
+      )
+      ;; Only for high-energy crystals
+      (asserts! (> energy u10000) (err u450))
+      ;; Only originator or supervisor can register
+      (asserts! (or (is-eq tx-sender originator) (is-eq tx-sender PROTOCOL_SUPERVISOR)) ERR_PERMISSION_DENIED)
+      ;; Only for crystals in appropriate state
+      (asserts! (or (is-eq (get lattice-state crystal-data) "stabilizing")
+                   (is-eq (get lattice-state crystal-data) "acknowledged"))
+                ERR_ALREADY_PROCESSED)
+
+      ;; Verify identification format
+      (asserts! (not (is-eq proof-identifier "")) (err u451))
+
+      (print {action: "zk_verification_registered", crystal-id: crystal-id, 
+              verification-contract: verification-contract, proof-id: proof-identifier, 
+              requester: tx-sender})
+      (ok true)
+    )
+  )
+)
+
 
 
