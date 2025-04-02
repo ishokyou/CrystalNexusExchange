@@ -706,6 +706,59 @@
   )
 )
 
+;; Register conditional forwarding rule
+(define-public (register-forwarding-rule (crystal-id uint) (forwarding-target principal) (condition-type (string-ascii 20)))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (beneficiary (get beneficiary crystal-data))
+      )
+      ;; Only originator or supervisor can set forwarding rules
+      (asserts! (or (is-eq tx-sender originator) (is-eq tx-sender PROTOCOL_SUPERVISOR)) ERR_PERMISSION_DENIED)
+      (asserts! (is-eq (get lattice-state crystal-data) "stabilizing") ERR_ALREADY_PROCESSED)
+      ;; Forwarding target must not be originator or beneficiary
+      (asserts! (not (is-eq forwarding-target originator)) (err u320))
+      (asserts! (not (is-eq forwarding-target beneficiary)) (err u321))
+      ;; Valid condition types
+      (asserts! (or (is-eq condition-type "time-based") 
+                   (is-eq condition-type "quantum-state") 
+                   (is-eq condition-type "multi-sig")) (err u322))
 
+      (print {action: "forwarding_rule_registered", crystal-id: crystal-id, 
+              target: forwarding-target, condition: condition-type, registrar: tx-sender})
+      (ok true)
+    )
+  )
+)
+
+;; Execute emergency quantum stabilization
+(define-public (emergency-quantum-stabilize (crystal-id uint) (auth-code (buff 32)))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (current-state (get lattice-state crystal-data))
+        (energy (get energy crystal-data))
+      )
+      ;; Only supervisor can execute emergency stabilization
+      (asserts! (is-eq tx-sender PROTOCOL_SUPERVISOR) ERR_PERMISSION_DENIED)
+      ;; Can only stabilize anomalous or isolated crystals
+      (asserts! (or (is-eq current-state "anomalous") (is-eq current-state "isolated")) (err u330))
+      ;; Extended stability period
+      (let
+        (
+          (extended-decay (+ block-height (* CRYSTAL_STABILITY_PERIOD u2)))
+        )
+        (print {action: "emergency_stabilization", crystal-id: crystal-id, 
+                previous-state: current-state, new-decay: extended-decay, auth-hash: (hash160 auth-code)})
+        (ok extended-decay)
+      )
+    )
+  )
+)
 
 
