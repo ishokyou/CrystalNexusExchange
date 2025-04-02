@@ -299,3 +299,53 @@
   )
 )
 
+
+;; Isolate unstable crystal
+(define-public (isolate-unstable-crystal (crystal-id uint) (instability-report (string-ascii 100)))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (beneficiary (get beneficiary crystal-data))
+      )
+      (asserts! (or (is-eq tx-sender PROTOCOL_SUPERVISOR) (is-eq tx-sender originator) (is-eq tx-sender beneficiary)) ERR_PERMISSION_DENIED)
+      (asserts! (or (is-eq (get lattice-state crystal-data) "stabilizing") 
+                   (is-eq (get lattice-state crystal-data) "acknowledged")) 
+                ERR_ALREADY_PROCESSED)
+      (map-set CrystalLattice
+        { crystal-id: crystal-id }
+        (merge crystal-data { lattice-state: "isolated" })
+      )
+      (print {action: "crystal_isolated", crystal-id: crystal-id, reporter: tx-sender, reason: instability-report})
+      (ok true)
+    )
+  )
+)
+
+;; Create a phased crystal formation
+(define-public (create-phased-crystal (beneficiary principal) (wavelength uint) (energy uint) (phases uint))
+  (let 
+    (
+      (new-id (+ (var-get latest-crystal-id) u1))
+      (decay-point (+ block-height CRYSTAL_STABILITY_PERIOD))
+      (phase-energy (/ energy phases))
+    )
+    (asserts! (> energy u0) ERR_INVALID_QUANTITY)
+    (asserts! (> phases u0) ERR_INVALID_QUANTITY)
+    (asserts! (<= phases u5) ERR_INVALID_QUANTITY) ;; Max 5 phases
+    (asserts! (valid-beneficiary? beneficiary) ERR_INVALID_ORIGINATOR)
+    (asserts! (is-eq (* phase-energy phases) energy) (err u121)) ;; Ensure even division
+    (match (stx-transfer? energy tx-sender (as-contract tx-sender))
+      success
+        (begin
+          (var-set latest-crystal-id new-id)
+          (print {action: "phased_crystal_formed", crystal-id: new-id, originator: tx-sender, beneficiary: beneficiary, 
+                  wavelength: wavelength, energy: energy, phases: phases, phase-energy: phase-energy})
+          (ok new-id)
+        )
+      error ERR_TRANSMISSION_FAILED
+    )
+  )
+)
