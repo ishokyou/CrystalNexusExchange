@@ -155,4 +155,55 @@
   )
 )
 
+;; Reclaim decayed crystal energy
+(define-public (reclaim-decayed-crystal (crystal-id uint))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (energy (get energy crystal-data))
+        (decay-point (get decay-block crystal-data))
+      )
+      (asserts! (or (is-eq tx-sender originator) (is-eq tx-sender PROTOCOL_SUPERVISOR)) ERR_PERMISSION_DENIED)
+      (asserts! (or (is-eq (get lattice-state crystal-data) "stabilizing") (is-eq (get lattice-state crystal-data) "acknowledged")) ERR_ALREADY_PROCESSED)
+      (asserts! (> block-height decay-point) (err u108)) ;; Must be decayed
+      (match (as-contract (stx-transfer? energy tx-sender originator))
+        success
+          (begin
+            (map-set CrystalLattice
+              { crystal-id: crystal-id }
+              (merge crystal-data { lattice-state: "decayed" })
+            )
+            (print {action: "decayed_crystal_reclaimed", crystal-id: crystal-id, originator: originator, energy: energy})
+            (ok true)
+          )
+        error ERR_TRANSMISSION_FAILED
+      )
+    )
+  )
+)
 
+;; Request lattice anomaly investigation
+(define-public (report-lattice-anomaly (crystal-id uint) (anomaly-description (string-ascii 50)))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (beneficiary (get beneficiary crystal-data))
+      )
+      (asserts! (or (is-eq tx-sender originator) (is-eq tx-sender beneficiary)) ERR_PERMISSION_DENIED)
+      (asserts! (or (is-eq (get lattice-state crystal-data) "stabilizing") (is-eq (get lattice-state crystal-data) "acknowledged")) ERR_ALREADY_PROCESSED)
+      (asserts! (<= block-height (get decay-block crystal-data)) ERR_CRYSTAL_DECAYED)
+      (map-set CrystalLattice
+        { crystal-id: crystal-id }
+        (merge crystal-data { lattice-state: "anomalous" })
+      )
+      (print {action: "anomaly_reported", crystal-id: crystal-id, reporter: tx-sender, description: anomaly-description})
+      (ok true)
+    )
+  )
+)
