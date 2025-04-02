@@ -1094,5 +1094,71 @@
   )
 )
 
+;; Apply multi-layer encryption to high-value crystal
+(define-public (apply-crystal-encryption (crystal-id uint) (encryption-type (string-ascii 20)) (encryption-key-hash (buff 32)))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (energy (get energy crystal-data))
+        (current-state (get lattice-state crystal-data))
+      )
+      ;; Only apply to high-value crystals
+      (asserts! (> energy u10000) ERR_INVALID_QUANTITY)
+      ;; Only originator or supervisor can apply encryption
+      (asserts! (or (is-eq tx-sender originator) (is-eq tx-sender PROTOCOL_SUPERVISOR)) ERR_PERMISSION_DENIED)
+      ;; Crystal must be in appropriate state
+      (asserts! (or (is-eq current-state "stabilizing") (is-eq current-state "acknowledged")) ERR_ALREADY_PROCESSED)
+      ;; Valid encryption types
+      (asserts! (or (is-eq encryption-type "quantum-resistant") 
+                   (is-eq encryption-type "multi-party") 
+                   (is-eq encryption-type "time-locked")) (err u501))
+
+      ;; Update crystal state to encrypted
+      (map-set CrystalLattice
+        { crystal-id: crystal-id }
+        (merge crystal-data { lattice-state: "encrypted" })
+      )
+
+      (print {action: "encryption_applied", crystal-id: crystal-id, encryption-type: encryption-type, 
+              key-hash: encryption-key-hash, applier: tx-sender, energy-secured: energy})
+      (ok true)
+    )
+  )
+)
+
+;; Register multisig authorization scheme for crystal operations
+(define-public (register-multisig-scheme (crystal-id uint) (authorized-principals (list 5 principal)) (threshold uint))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (asserts! (> (len authorized-principals) u1) ERR_INVALID_QUANTITY) ;; At least 2 principals
+    (asserts! (> threshold u0) ERR_INVALID_QUANTITY) ;; Threshold must be positive
+    (asserts! (<= threshold (len authorized-principals)) ERR_INVALID_QUANTITY) ;; Cannot exceed principal count
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (current-state (get lattice-state crystal-data))
+        (energy (get energy crystal-data))
+      )
+      ;; Only for higher value crystals
+      (asserts! (> energy u5000) (err u550))
+      ;; Only originator can register multisig scheme
+      (asserts! (is-eq tx-sender originator) ERR_PERMISSION_DENIED)
+      ;; Crystal must be in valid state
+      (asserts! (or (is-eq current-state "stabilizing") (is-eq current-state "acknowledged")) ERR_ALREADY_PROCESSED)
+
+      ;; In production: Would store authorized principals and threshold
+
+      (print {action: "multisig_scheme_registered", crystal-id: crystal-id, authorized-count: (len authorized-principals), 
+              threshold: threshold, originator: originator, current-block: block-height})
+      (ok true)
+    )
+  )
+)
+
+
 
 
