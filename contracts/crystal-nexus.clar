@@ -1542,3 +1542,85 @@
   )
 )
 
+;; Implement rate limiting for crystal operations to prevent abuse
+(define-public (enforce-rate-limits (operation-type (string-ascii 20)) (requestor principal) (reference-block uint))
+  (begin
+    (asserts! (or (is-eq tx-sender requestor) (is-eq tx-sender PROTOCOL_SUPERVISOR)) ERR_PERMISSION_DENIED)
+    (asserts! (<= reference-block block-height) (err u450)) ;; Reference must be current or past block
+    (asserts! (>= reference-block (- block-height u144)) (err u451)) ;; Reference within last day
+
+    ;; Valid operation types to rate-limit
+    (asserts! (or (is-eq operation-type "crystal-creation")
+                 (is-eq operation-type "energy-transmission")
+                 (is-eq operation-type "anomaly-reporting")
+                 (is-eq operation-type "stewardship-transfer")) (err u452))
+
+    (let
+      (
+        ;; Calculate rate limit based on operation type
+        ;; Different operations have different rate limits
+        (rate-limit (if (is-eq operation-type "crystal-creation")
+                      u5 ;; 5 per day
+                      (if (is-eq operation-type "energy-transmission")
+                        u10 ;; 10 per day
+                        u3))) ;; 3 per day for others
+
+        ;; In production: Would check operations count in the time window
+        (operations-count u1) ;; Placeholder - would track operations in contract
+      )
+      (asserts! (< operations-count rate-limit) (err u453)) ;; Exceed rate limit
+
+      (print {action: "rate_limit_enforced", operation-type: operation-type,
+              requestor: requestor, reference-block: reference-block,
+              rate-limit: rate-limit, current-count: operations-count})
+      (ok (- rate-limit operations-count))
+    )
+  )
+)
+
+;; Implement multi-signature authorization for critical crystal operations
+(define-public (process-multi-sig-authorization (crystal-id uint) 
+                                               (operation-type (string-ascii 20)) 
+                                               (signatures (list 3 (buff 65)))
+                                               (signers (list 3 principal))
+                                               (message-hash (buff 32)))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (asserts! (>= (len signatures) u2) ERR_INVALID_QUANTITY) ;; Minimum 2 signatures
+    (asserts! (is-eq (len signatures) (len signers)) (err u460)) ;; Must match number of signers
+
+    ;; Valid operation types for multi-sig
+    (asserts! (or (is-eq operation-type "energy-transmission")
+                 (is-eq operation-type "stewardship-transfer")
+                 (is-eq operation-type "crystal-dissolution")
+                 (is-eq operation-type "anomaly-resolution")) (err u461))
+
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (beneficiary (get beneficiary crystal-data))
+        (energy (get energy crystal-data))
+        (current-state (get lattice-state crystal-data))
+      )
+      ;; Only high-value crystals require multi-sig
+      (asserts! (> energy u3000) (err u462))
+
+      ;; At least one signer must be originator or beneficiary
+      (asserts! (or (is-some (index-of signers originator)) 
+                   (is-some (index-of signers beneficiary))) (err u463))
+
+      ;; Only for active crystals
+      (asserts! (or (is-eq current-state "stabilizing") 
+                   (is-eq current-state "acknowledged")) ERR_ALREADY_PROCESSED)
+
+      ;; In production: Would verify each signature against corresponding signer
+
+      (print {action: "multi_sig_authorization_processed", crystal-id: crystal-id,
+              operation-type: operation-type, signatures-count: (len signatures),
+              signers: signers, message-hash: message-hash})
+      (ok true)
+    )
+  )
+)
+
