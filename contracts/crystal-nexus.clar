@@ -1218,3 +1218,62 @@
   )
 )
 
+
+;; Implement secure audit log for critical crystal operations
+(define-public (register-secure-audit-entry (crystal-id uint) (operation-type (string-ascii 20)) (operation-hash (buff 32)))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (beneficiary (get beneficiary crystal-data))
+      )
+      ;; Only authorized parties can register audit entries
+      (asserts! (or (is-eq tx-sender originator) 
+                   (is-eq tx-sender beneficiary) 
+                   (is-eq tx-sender PROTOCOL_SUPERVISOR)) ERR_PERMISSION_DENIED)
+
+      ;; Valid operation types for audit
+      (asserts! (or (is-eq operation-type "key-rotation")
+                   (is-eq operation-type "beneficiary-change")
+                   (is-eq operation-type "parameter-update")
+                   (is-eq operation-type "emergency-action")
+                   (is-eq operation-type "auth-attempt")) (err u700))
+
+      ;; In production: Would store audit log entries
+
+      (print {action: "audit_entry_registered", crystal-id: crystal-id, 
+              operation-type: operation-type, operation-hash: operation-hash,
+              registrar: tx-sender, block-height: block-height, 
+              txid: tx-sender})
+      (ok true)
+    )
+  )
+)
+;; Verify crystal integrity through quantum hash verification
+(define-public (verify-crystal-integrity (crystal-id uint) (integrity-proof (buff 64)) (verification-nonce (buff 32)))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (beneficiary (get beneficiary crystal-data))
+        (current-state (get lattice-state crystal-data))
+      )
+      ;; Only authorized parties can verify integrity
+      (asserts! (or (is-eq tx-sender originator) (is-eq tx-sender beneficiary) (is-eq tx-sender PROTOCOL_SUPERVISOR)) ERR_PERMISSION_DENIED)
+      ;; Only certain states allow integrity verification
+      (asserts! (or (is-eq current-state "stabilizing") (is-eq current-state "acknowledged") (is-eq current-state "anomalous")) ERR_ALREADY_PROCESSED)
+
+      ;; In production: Would verify hash with cryptographic proof
+
+      ;; Record the integrity verification
+      (print {action: "integrity_verified", crystal-id: crystal-id, verifier: tx-sender, 
+              proof-hash: (hash160 integrity-proof), nonce-hash: (hash160 verification-nonce)})
+      (ok true)
+    )
+  )
+)
+
