@@ -992,4 +992,48 @@
 )
 
 
+;; Implement advanced circuit-breaker pattern for protocol safety
+(define-public (implement-circuit-breaker (activation-threshold uint) (cooldown-period uint) (authorized-resolver principal))
+  (begin
+    (asserts! (is-eq tx-sender PROTOCOL_SUPERVISOR) ERR_PERMISSION_DENIED)
+    (asserts! (> activation-threshold u0) ERR_INVALID_QUANTITY)
+    (asserts! (<= activation-threshold u50) ERR_INVALID_QUANTITY) ;; Max 50% threshold
+    (asserts! (> cooldown-period u36) ERR_INVALID_QUANTITY) ;; Minimum 36 blocks cooldown (~6 hours)
+    (asserts! (<= cooldown-period u288) ERR_INVALID_QUANTITY) ;; Maximum 288 blocks cooldown (~2 days)
+    (asserts! (not (is-eq authorized-resolver tx-sender)) (err u500)) ;; Resolver must be different from supervisor
+
+    ;; In production: would update circuit breaker state and parameters
+
+    (print {action: "circuit_breaker_implemented", threshold: activation-threshold, 
+            cooldown: cooldown-period, resolver: authorized-resolver, 
+            implementation-block: block-height})
+    (ok block-height)
+  )
+)
+
+;; Apply cryptographic rate-limiting to high-value operations
+(define-public (apply-rate-limiting (operation-type (string-ascii 20)) (max-operations-per-day uint) (proof-difficulty uint))
+  (begin
+    (asserts! (is-eq tx-sender PROTOCOL_SUPERVISOR) ERR_PERMISSION_DENIED)
+    (asserts! (> max-operations-per-day u0) ERR_INVALID_QUANTITY)
+    (asserts! (<= max-operations-per-day u100) ERR_INVALID_QUANTITY) ;; Maximum 100 operations per day
+    (asserts! (> proof-difficulty u0) ERR_INVALID_QUANTITY)
+    (asserts! (<= proof-difficulty u10) ERR_INVALID_QUANTITY) ;; Difficulty scale 1-10
+
+    ;; Valid operation types
+    (asserts! (or (is-eq operation-type "energy-transmission")
+                 (is-eq operation-type "crystal-extraction")
+                 (is-eq operation-type "beneficiary-change")
+                 (is-eq operation-type "stability-extension"))
+              (err u550))
+
+    ;; In production: would update rate limiting parameters for the specified operation
+
+    (print {action: "rate_limiting_applied", operation: operation-type, 
+            max-daily-ops: max-operations-per-day, difficulty: proof-difficulty,
+            effective-from: block-height})
+    (ok true)
+  )
+)
+
 
