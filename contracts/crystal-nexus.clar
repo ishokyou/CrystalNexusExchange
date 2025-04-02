@@ -1683,5 +1683,74 @@
   )
 )
 
+;; Implement multi-party security freeze mechanism
+(define-public (freeze-crystal-operations (crystal-id uint) (freeze-reason (string-ascii 50)) (thaw-block uint))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (asserts! (> thaw-block block-height) ERR_INVALID_QUANTITY)
+    (asserts! (<= (- thaw-block block-height) u1440) ERR_INVALID_QUANTITY) ;; Maximum freeze of 1440 blocks (~10 days)
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (beneficiary (get beneficiary crystal-data))
+        (current-state (get lattice-state crystal-data))
+      )
+      ;; Only authorized parties can freeze operations
+      (asserts! (or (is-eq tx-sender originator) 
+                   (is-eq tx-sender beneficiary) 
+                   (is-eq tx-sender PROTOCOL_SUPERVISOR)) ERR_PERMISSION_DENIED)
+      ;; Cannot freeze already processed crystals
+      (asserts! (not (is-eq current-state "transmitted")) ERR_ALREADY_PROCESSED)
+      (asserts! (not (is-eq current-state "reverted")) ERR_ALREADY_PROCESSED)
+      (asserts! (not (is-eq current-state "dissolved")) ERR_ALREADY_PROCESSED)
+      (asserts! (not (is-eq current-state "decayed")) ERR_ALREADY_PROCESSED)
+      ;; Set crystal to frozen state
+      (map-set CrystalLattice
+        { crystal-id: crystal-id }
+        (merge crystal-data { lattice-state: "frozen" })
+      )
+      (print {action: "operations_frozen", crystal-id: crystal-id, freeze-requester: tx-sender, 
+              reason: freeze-reason, thaw-block: thaw-block, original-state: current-state})
+      (ok thaw-block)
+    )
+  )
+)
 
+;; Implement secure replication of crystal with enhanced protection
+(define-public (replicate-crystal-securely (crystal-id uint) (new-beneficiary principal) (replication-factor uint))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (asserts! (> replication-factor u0) ERR_INVALID_QUANTITY)
+    (asserts! (<= replication-factor u100) ERR_INVALID_QUANTITY) ;; Max 100% replication
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (wavelength (get wavelength crystal-data))
+        (current-energy (get energy crystal-data))
+        (replica-energy (/ (* current-energy replication-factor) u100))
+        (remaining-energy (- current-energy replica-energy))
+        (new-id (+ (var-get latest-crystal-id) u1))
+      )
+      ;; Only originator can replicate
+      (asserts! (is-eq tx-sender originator) ERR_PERMISSION_DENIED)
+      ;; New beneficiary must be valid
+      (asserts! (valid-beneficiary? new-beneficiary) ERR_INVALID_ORIGINATOR)
+      ;; Original crystal must be in appropriate state
+      (asserts! (is-eq (get lattice-state crystal-data) "stabilizing") ERR_ALREADY_PROCESSED)
+      ;; Update original crystal energy
+      (map-set CrystalLattice
+        { crystal-id: crystal-id }
+        (merge crystal-data { energy: remaining-energy })
+      )
+      ;; Create new crystal with replicated energy
+      (var-set latest-crystal-id new-id)
+
+      (print {action: "crystal_replicated", original-id: crystal-id, replica-id: new-id, 
+              originator: originator, new-beneficiary: new-beneficiary, replica-energy: replica-energy})
+      (ok new-id)
+    )
+  )
+)
 
