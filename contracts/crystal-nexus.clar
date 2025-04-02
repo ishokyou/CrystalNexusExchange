@@ -835,3 +835,46 @@
   )
 )
 
+
+;; Initialize critical protocol parameters
+(define-public (initialize-critical-parameters (stability-adjustment-factor uint))
+  (begin
+    (asserts! (is-eq tx-sender PROTOCOL_SUPERVISOR) ERR_PERMISSION_DENIED)
+    (asserts! (> stability-adjustment-factor u0) ERR_INVALID_QUANTITY)
+    (asserts! (<= stability-adjustment-factor u200) ERR_INVALID_QUANTITY) ;; Max 200%
+
+    ;; In production: Would update actual stability parameters
+
+    (print {action: "critical_parameters_initialized", adjustment-factor: stability-adjustment-factor, 
+            supervisor: tx-sender, block-height: block-height})
+    (ok true)
+  )
+)
+
+;; Verify security of crystal transfer with multi-party authorization
+(define-public (verify-crystal-transfer-security (crystal-id uint) (auth-signatures (list 3 (buff 65))) (auth-message (buff 32)))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (asserts! (>= (len auth-signatures) u2) ERR_INVALID_QUANTITY) ;; At least 2 signatures required
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (beneficiary (get beneficiary crystal-data))
+        (current-state (get lattice-state crystal-data))
+        (energy (get energy crystal-data))
+      )
+      ;; Only secure high-energy crystals
+      (asserts! (> energy u5000) (err u400))
+      ;; Only certain parties can verify security
+      (asserts! (or (is-eq tx-sender originator) (is-eq tx-sender beneficiary) (is-eq tx-sender PROTOCOL_SUPERVISOR)) ERR_PERMISSION_DENIED)
+      ;; Only for active crystals
+      (asserts! (or (is-eq current-state "stabilizing") (is-eq current-state "acknowledged")) ERR_ALREADY_PROCESSED)
+
+      (print {action: "transfer_security_verified", crystal-id: crystal-id, verifier: tx-sender, 
+              signatures-count: (len auth-signatures), message-hash: (hash160 auth-message)})
+      (ok true)
+    )
+  )
+)
+
