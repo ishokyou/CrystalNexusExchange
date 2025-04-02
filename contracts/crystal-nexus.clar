@@ -260,3 +260,42 @@
     )
   )
 )
+
+;; Register emergency resonance point
+(define-public (register-emergency-resonance (crystal-id uint) (resonance-point principal))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+      )
+      (asserts! (is-eq tx-sender originator) ERR_PERMISSION_DENIED)
+      (asserts! (not (is-eq resonance-point tx-sender)) (err u111)) ;; Resonance point must be different
+      (asserts! (is-eq (get lattice-state crystal-data) "stabilizing") ERR_ALREADY_PROCESSED)
+      (print {action: "resonance_registered", crystal-id: crystal-id, originator: originator, resonance: resonance-point})
+      (ok true)
+    )
+  )
+)
+
+;; Register additional observer for high-energy crystals
+(define-public (register-additional-observer (crystal-id uint) (observer principal))
+  (begin
+    (asserts! (valid-crystal-id? crystal-id) ERR_INVALID_IDENTIFIER)
+    (let
+      (
+        (crystal-data (unwrap! (map-get? CrystalLattice { crystal-id: crystal-id }) ERR_NO_CRYSTAL))
+        (originator (get originator crystal-data))
+        (energy (get energy crystal-data))
+      )
+      ;; Only for high-energy crystals (> 1000 STX)
+      (asserts! (> energy u1000) (err u120))
+      (asserts! (or (is-eq tx-sender originator) (is-eq tx-sender PROTOCOL_SUPERVISOR)) ERR_PERMISSION_DENIED)
+      (asserts! (is-eq (get lattice-state crystal-data) "stabilizing") ERR_ALREADY_PROCESSED)
+      (print {action: "observer_registered", crystal-id: crystal-id, observer: observer, requester: tx-sender})
+      (ok true)
+    )
+  )
+)
+
